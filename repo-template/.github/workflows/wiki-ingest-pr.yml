@@ -1,0 +1,68 @@
+# After a PR merges, compile it into .wiki/ and open a follow-up PR with the wiki changes.
+# Wiki-only PRs (the ones this workflow opens) are skipped to avoid loops.
+name: wiki-ingest-pr
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: wiki-write
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: github.event.pull_request.merged == true && !startsWith(github.event.pull_request.head.ref, 'wiki/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+      - name: Digest the PR into .wiki/raw/prs/
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "wiki-curator-bot"
+          git config user.email "wiki-curator-bot@users.noreply.github.com"
+          git switch -c "wiki/pr-${{ github.event.pull_request.number }}"
+          bash tools/wiki_pr_digest.sh "${{ github.event.pull_request.number }}"
+      - name: Compile into the wiki
+        env:
+          # Token of the curator service seat. Check GitHub's Copilot CLI docs for the
+          # variable name and permission it currently requires for non-interactive use.
+          COPILOT_GITHUB_TOKEN: ${{ secrets.WIKI_CURATOR_TOKEN }}
+        run: |
+          copilot -p "Follow .github/prompts/wiki-ingest.prompt.md with source=.wiki/raw/prs/${{ github.event.pull_request.number }}.md. Skip step 1 (already done) and step 7. Stage your changes; do not commit." \
+            --agent wiki-curator \
+            --allow-tool 'write' \
+            --allow-tool 'shell(python tools/wiki_check.py:*)' \
+            --allow-tool 'shell(python tools/wiki_manifest.py:*)' \
+            --allow-tool 'shell(git add:*)' \
+            --allow-tool 'shell(git log:*)' \
+            --allow-tool 'shell(git diff:*)' \
+            --deny-tool 'shell(git push)' \
+            --deny-tool 'shell(git commit)' \
+            --deny-tool 'shell(rm:*)'
+          git add .wiki/
+          python tools/wiki_check.py --staged
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff --cached --quiet && { echo "no wiki changes"; exit 0; }
+          git commit -m "wiki: compile PR #${{ github.event.pull_request.number }}"
+          git push -u origin HEAD
+          gh pr create --fill --label wiki \
+            --body "Module memory compiled from #${{ github.event.pull_request.number }} by the wiki-curator agent. Check new Conflicts entries before merging."

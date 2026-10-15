@@ -1,0 +1,72 @@
+# When new files land in raw/ on main, compile them and open a PR with the wiki changes.
+name: wiki-ingest
+on:
+  push:
+    branches: [main]
+    paths: ["raw/**", "!raw/manifest.jsonl"]
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Space-separated raw/ paths to ingest"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: wiki-write
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install tools
+        run: |
+          npm install -g @github/copilot
+          pip install ./mcp
+          mkdir -p ~/.copilot
+          cat > ~/.copilot/mcp-config.json <<EOF
+          {"mcpServers": {"llm-wiki": {"type": "local", "command": "python",
+            "args": ["-m", "wiki_mcp", "--root", "$GITHUB_WORKSPACE", "--read-only"], "tools": ["*"]}}}
+          EOF
+      - name: Find new sources
+        id: find
+        run: |
+          if [ -n "${{ inputs.sources }}" ]; then
+            echo "files=${{ inputs.sources }}" >> "$GITHUB_OUTPUT"
+          else
+            files=$(git diff --name-only --diff-filter=A "${{ github.event.before }}" "${{ github.sha }}" -- raw/ \
+                    | grep -v 'manifest.jsonl$' | tr '\n' ' ')
+            echo "files=$files" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compile into the wiki
+        if: steps.find.outputs.files != ''
+        env:
+          # Token of the curator service seat. Check GitHub's Copilot CLI docs for the
+          # variable name and permission it currently requires for non-interactive use.
+          COPILOT_GITHUB_TOKEN: ${{ secrets.WIKI_CURATOR_TOKEN }}
+        run: |
+          git config user.name "wiki-curator-bot"
+          git config user.email "wiki-curator-bot@users.noreply.github.com"
+          git switch -c "ingest/${{ github.run_id }}"
+          bash scripts/ingest_batch.sh ${{ steps.find.outputs.files }}
+      - name: Open PR
+        if: steps.find.outputs.files != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet origin/main...HEAD; then echo "nothing compiled"; exit 0; fi
+          git push -u origin HEAD
+          gh pr create --fill --label wiki-ingest \
+            --body "Compiled by the wiki-curator agent from: ${{ steps.find.outputs.files }}. Review the diff and every new Conflicts entry before merging."

@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "llm-wiki": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "wiki_mcp", "--root", "${workspaceFolder}", "--read-only"]
+    }
+  }
+}

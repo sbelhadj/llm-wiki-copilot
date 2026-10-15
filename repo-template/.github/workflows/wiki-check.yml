@@ -1,0 +1,23 @@
+# Deterministic wiki guardrails on every PR. No model involved.
+name: wiki-check
+on:
+  pull_request:
+    paths: [".wiki/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Raw files are append-only, pages are cited and linked
+        run: |
+          python tools/wiki_check.py --all --base "origin/${{ github.base_ref }}" \
+            --fail-on raw_modified,uncited,unknown_source,broken,frontmatter,duplicate_slug,unindexed

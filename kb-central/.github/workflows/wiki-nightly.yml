@@ -1,0 +1,66 @@
+# Sampled semantic lint every weekday night. Opens a PR; never commits to main.
+name: wiki-nightly-lint
+on:
+  schedule:
+    - cron: "0 2 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      size:
+        description: "Pages to sample"
+        default: "50"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: wiki-write
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install tools
+        run: |
+          npm install -g @github/copilot
+          pip install ./mcp
+          mkdir -p ~/.copilot
+          cat > ~/.copilot/mcp-config.json <<EOF
+          {"mcpServers": {"llm-wiki": {"type": "local", "command": "python",
+            "args": ["-m", "wiki_mcp", "--root", "$GITHUB_WORKSPACE", "--read-only"], "tools": ["*"]}}}
+          EOF
+      - name: Semantic lint (sampled)
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.WIKI_CURATOR_TOKEN }}
+        run: |
+          git config user.name "wiki-curator-bot"
+          git config user.email "wiki-curator-bot@users.noreply.github.com"
+          git switch -c "lint/$(date +%F)"
+          copilot -p "Follow .github/prompts/wiki-lint.prompt.md with scope=sample size=${{ inputs.size || '50' }}. Stage your changes; do not commit." \
+            --agent wiki-curator \
+            --allow-tool 'write' \
+            --allow-tool 'shell(python tools/wiki_check.py:*)' \
+            --allow-tool 'shell(git add:*)' \
+            --allow-tool 'llm-wiki' \
+            --deny-tool 'shell(git push)' \
+            --deny-tool 'shell(git commit)' \
+            --deny-tool 'shell(rm:*)'
+          git add wiki/
+          python tools/wiki_check.py --staged
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff --cached --quiet && { echo "no lint changes"; exit 0; }
+          git commit -m "nightly lint $(date +%F)"
+          git push -u origin HEAD
+          gh pr create --fill --label wiki-lint \
+            --body "Sampled semantic lint. Every new Conflicts entry needs a human decision."

@@ -1,0 +1,7 @@
+{
+  "default": ["entities", "concepts", "sources", "syntheses", "playbooks"],
+  "users": {
+    "wiki-curator-bot@corp.example": ["*"],
+    "platform-lead@corp.example": ["*"]
+  }
+}
