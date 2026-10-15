@@ -1,6 +1,6 @@
 # LLM Wiki for GitHub Copilot Business
 
-Reference implementation of the setup described in [Stop retrieving, start compiling: the LLM Wiki pattern](https://tech-tech.life). It gives a Copilot Business team an agent-maintained knowledge base: sources are compiled once into cross-linked markdown pages, and every agent, IDE and bot reads those pages instead of re-retrieving raw documents.
+Reference implementation of the setup described in [Stop retrieving, start compiling: the LLM Wiki pattern](https://tech-tech.life/2026/10/15/stop-retrieving-start-compiling-the-llm-wiki-pattern/). It gives a Copilot Business team an agent-maintained knowledge base: sources are compiled once into cross-linked markdown pages, and every agent, IDE and bot reads those pages instead of re-retrieving raw documents.
 
 It runs with VS Code agent mode, Copilot CLI and GitHub Actions. The only Python dependency is the `mcp` package, for the MCP server.
 
